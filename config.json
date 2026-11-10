@@ -1,0 +1,40 @@
+{
+  "ProgramDataNuance": "C:\\ProgramData\\Nuance\\NaturallySpeaking12",
+  "LocalProfilePaths": [
+    "C:\\ProgramData\\Nuance\\NaturallySpeaking12\\Users",
+    "C:\\DragonLocalProfiles"
+  ],
+  "DragonProcesses": [
+    "natspeak",
+    "dnsminibar",
+    "dnsspserver",
+    "dgnuiasvr",
+    "dgnuiasvr_x64"
+  ],
+  "DictBoxDisableClasses": [
+    "SunAwtFrame=1",
+    "SunAwtDialog=1",
+    "SunAwtCanvas=1",
+    "SunAwtComponent=1",
+    "TX33=1",
+    "TX33_DOTNET=1",
+    "TX32=1",
+    "tx33_rtf=1",
+    "TXTextControl=1"
+  ],
+  "DictLevelDefaultClasses": [
+    "SunAwtFrame=2",
+    "SunAwtDialog=2",
+    "SunAwtCanvas=2",
+    "SunAwtComponent=2",
+    "TX33=10",
+    "TX33_DOTNET=10",
+    "TX32=10"
+  ],
+  "EnableClasses": [
+    "TX33=10",
+    "TX33_DOTNET=10",
+    "TX32=10"
+  ],
+  "CleanupProfileAppMatchRegex": "Java\\(TM\\)|javaw|java|KWS|Fresco|DaVinci"
+}
