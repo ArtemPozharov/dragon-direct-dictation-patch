@@ -20,6 +20,9 @@
     "TX33_DOTNET=1",
     "TX32=1",
     "tx33_rtf=1",
+    "TX20=1",
+    "TX20_DOTNET=1",
+    "tx20_rtf=1",
     "TXTextControl=1"
   ],
   "DictLevelDefaultClasses": [
@@ -29,12 +32,16 @@
     "SunAwtComponent=2",
     "TX33=10",
     "TX33_DOTNET=10",
-    "TX32=10"
+    "TX32=10",
+    "TX20=2",
+    "TX20_DOTNET=2"
   ],
   "EnableClasses": [
     "TX33=10",
     "TX33_DOTNET=10",
-    "TX32=10"
+    "TX32=10",
+    "TX20=10",
+    "TX20_DOTNET=10"
   ],
-  "CleanupProfileAppMatchRegex": "Java\\(TM\\)|javaw|java|KWS|Fresco|DaVinci"
+  "CleanupProfileAppMatchRegex": "Java\\(TM\\)|javaw|java|KWS|Fresco|DaVinci|CNExpress|CliniNET"
 }

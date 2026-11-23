@@ -1,16 +1,17 @@
-<#
+﻿<#
 .SYNOPSIS
     Patch-DragonKWS.ps1
-    Herstelt directe spraakdictatie in KWS (Java Swing/AWT) en LIS.DaVinci (TX Text Control 33 / .NET WinForms)
+    Herstelt directe spraakdictatie in KWS (Java Swing/AWT), LIS.DaVinci (TX Text Control 33 / .NET WinForms)
+    en CliniNET Express (CNExpress.exe / TX Text Control 20 / .NET WinForms)
     voor Dragon Medical Practice Edition 12 onder Windows 11 zonder gebruik van het Dicteervenster.
 
 .DESCRIPTION
     Dit script past de Dragon NaturallySpeaking 12 configuratie en lokale gebruikersprofielen aan op basis van config.json:
     1. Sluit actieve Dragon processen af indien nodig.
-    2. Configureert nsapps.ini:
+    2. Configureert nsapps.ini (in UTF-16 LE BOM formaat):
        - Schakelt het Dicteervenster uit voor geconfigureerde Java- en TX Text Control-vensterklassen.
-       - Stelt dictatieniveau 2 (enabled no focus) in voor Java AWT/Swing-componenten.
-       - Registreert TX Text Control 33 voor native Full Text Control.
+       - Stelt dictatieniveau 2 (enabled no focus) in voor Java AWT/Swing-componenten en als fallback voor CliniNET Express.
+       - Registreert TX Text Control 33 en TX Text Control 20 voor native Edit Control ondersteuning.
        - Voegt applicatieprofielen toe met Key Delay=2.
     3. Configureert nsdefaults.ini zodat nieuwe profielen standaard "Use Dictation Box=0" krijgen.
     4. Corrigeert uitsluitend lokale gebruikersprofielen op deze machine.
@@ -47,10 +48,10 @@ if (Test-Path $ConfigFile) {
             "C:\DragonLocalProfiles"
         )
         DragonProcesses            = @("natspeak", "dnsminibar", "dnsspserver", "dgnuiasvr", "dgnuiasvr_x64")
-        DictBoxDisableClasses      = @("SunAwtFrame=1", "SunAwtDialog=1", "SunAwtCanvas=1", "SunAwtComponent=1", "TX33=1", "TX33_DOTNET=1", "TX32=1", "tx33_rtf=1", "TXTextControl=1")
-        DictLevelDefaultClasses    = @("SunAwtFrame=2", "SunAwtDialog=2", "SunAwtCanvas=2", "SunAwtComponent=2", "TX33=10", "TX33_DOTNET=10", "TX32=10")
-        EnableClasses              = @("TX33=10", "TX33_DOTNET=10", "TX32=10")
-        CleanupProfileAppMatchRegex = "Java\(TM\)|javaw|java|KWS|Fresco|DaVinci"
+        DictBoxDisableClasses      = @("SunAwtFrame=1", "SunAwtDialog=1", "SunAwtCanvas=1", "SunAwtComponent=1", "TX33=1", "TX33_DOTNET=1", "TX32=1", "tx33_rtf=1", "TX20=1", "TX20_DOTNET=1", "tx20_rtf=1", "TXTextControl=1")
+        DictLevelDefaultClasses    = @("SunAwtFrame=2", "SunAwtDialog=2", "SunAwtCanvas=2", "SunAwtComponent=2", "TX33=10", "TX33_DOTNET=10", "TX32=10", "TX20=2", "TX20_DOTNET=2")
+        EnableClasses              = @("TX33=10", "TX33_DOTNET=10", "TX32=10", "TX20=10", "TX20_DOTNET=10")
+        CleanupProfileAppMatchRegex = "Java\(TM\)|javaw|java|KWS|Fresco|DaVinci|CNExpress|CliniNET"
     }
 }
 
@@ -83,8 +84,9 @@ if (Test-Path $nsappsPath) {
     Write-Log "Back-up opgeslagen in: $backupPath"
 
     $lines = Get-Content -Path $nsappsPath
-    $newLines = @()
+    $newLines = New-Object 'System.Collections.Generic.List[string]'
     $currentSection = ""
+    $currentSectionKeys = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
 
     $inDictBoxDisable = $false
     $inGlobalEnable = $false
@@ -96,117 +98,125 @@ if (Test-Path $nsappsPath) {
     $handledDictLevel = $false
     $handledEnableClasses = $false
 
+    function Add-MissingSectionLines {
+        param(
+            [string[]]$TargetLines,
+            [System.Collections.Generic.List[string]]$List,
+            [System.Collections.Generic.HashSet[string]]$SeenKeys
+        )
+        $hadTrailingBlank = $false
+        while ($List.Count -gt 0 -and [string]::IsNullOrWhiteSpace($List[$List.Count - 1])) {
+            $List.RemoveAt($List.Count - 1)
+            $hadTrailingBlank = $true
+        }
+        foreach ($k in $TargetLines) {
+            $kName = ($k -split "=", 2)[0].Trim()
+            if ($SeenKeys.Add($kName)) {
+                $List.Add($k)
+            }
+        }
+        if ($hadTrailingBlank) {
+            $List.Add("")
+        }
+    }
+
+    $stripSectionPattern = "^(javaw|java|javaws|fresco\.davinci(\.client)?(\.exe)?|davinci(\.exe)?|cnexpress(\.exe)?|clininet(\.exe)?)(\\.*)?$"
+
     foreach ($line in $lines) {
         $trimmed = $line.Trim()
         if ($trimmed -match "^\[(.*)\]$") {
             if ($inDictBoxDisable -and -not $handledDictBox) {
-                foreach ($k in $config.DictBoxDisableClasses) {
-                    $kName = ($k -split "=")[0]
-                    if ($newLines -notmatch "(?m)^" + [regex]::Escape($kName) + "=") {
-                        $newLines += $k
-                    }
-                }
+                Add-MissingSectionLines -TargetLines $config.DictBoxDisableClasses -List $newLines -SeenKeys $currentSectionKeys
                 $handledDictBox = $true
             }
             if ($inDictLevelDefault -and -not $handledDictLevel) {
-                foreach ($k in $config.DictLevelDefaultClasses) {
-                    $kName = ($k -split "=")[0]
-                    if ($newLines -notmatch "(?m)^" + [regex]::Escape($kName) + "=") {
-                        $newLines += $k
-                    }
-                }
+                Add-MissingSectionLines -TargetLines $config.DictLevelDefaultClasses -List $newLines -SeenKeys $currentSectionKeys
                 $handledDictLevel = $true
             }
             if ($inEnableClassNames -and -not $handledEnableClasses) {
-                foreach ($k in $config.EnableClasses) {
-                    $kName = ($k -split "=")[0]
-                    if ($newLines -notmatch "(?m)^" + [regex]::Escape($kName) + "=") {
-                        $newLines += $k
-                    }
-                }
+                Add-MissingSectionLines -TargetLines $config.EnableClasses -List $newLines -SeenKeys $currentSectionKeys
                 $handledEnableClasses = $true
             }
             if ($inGlobalEnable -and -not $handledGlobalEnable) {
-                foreach ($k in $config.EnableClasses) {
-                    $kName = ($k -split "=")[0]
-                    if ($newLines -notmatch "(?m)^" + [regex]::Escape($kName) + "=") {
-                        $newLines += $k
-                    }
-                }
+                Add-MissingSectionLines -TargetLines $config.EnableClasses -List $newLines -SeenKeys $currentSectionKeys
                 $handledGlobalEnable = $true
             }
 
             $currentSection = $matches[1]
+            $currentSectionKeys.Clear()
             $inDictBoxDisable = ($currentSection -eq "DictBox\Dictation Box Disable Class Names")
             $inDictLevelDefault = ($currentSection -eq ".Global\Global Dictation Level Default")
             $inEnableClassNames = ($currentSection -eq "\Enable Class Names")
             $inGlobalEnable = ($currentSection -eq ".Global\Global Enable Class Names")
 
-            if ($currentSection -match "^(javaw|java|javaws|fresco\.davinci|davinci)(\\.*)?$") {
+            if ($currentSection -match $stripSectionPattern) {
                 continue
             }
 
-            $newLines += $line
+            $newLines.Add($line)
             continue
         }
 
-        if ($currentSection -match "^(javaw|java|javaws|fresco\.davinci|davinci)(\\.*)?$") {
+        if ($currentSection -match $stripSectionPattern) {
             continue
         }
+
+        $lineToEmit = $line
+        $isManagedSection = $inGlobalEnable -or $inDictBoxDisable -or $inDictLevelDefault -or $inEnableClassNames
 
         if ($inGlobalEnable) {
             if ($trimmed -match "^SunAwt") {
                 continue
             }
-            if ($trimmed -match "^TX(32|33)") {
-                $newLines += ($trimmed -replace "=.*$", "=10")
-                continue
+            if ($trimmed -match "^TX(20|20_DOTNET|32|33|33_DOTNET)=") {
+                $lineToEmit = ($trimmed -replace "=.*$", "=10")
             }
-        }
-
-        if ($inDictBoxDisable) {
-            if ($trimmed -match "^(SunAwtFrame|SunAwtDialog|SunAwtCanvas|SunAwtComponent|TX33|TX33_DOTNET|TX32|tx33_rtf|TXTextControl)=") {
-                $newLines += ($trimmed -replace "=.*$", "=1")
-                continue
+        } elseif ($inDictBoxDisable) {
+            if ($trimmed -match "^(SunAwtFrame|SunAwtDialog|SunAwtCanvas|SunAwtComponent|TX33|TX33_DOTNET|TX32|tx33_rtf|TX20|TX20_DOTNET|tx20_rtf|TXTextControl)=") {
+                $lineToEmit = ($trimmed -replace "=.*$", "=1")
             }
-        }
-
-        if ($inDictLevelDefault) {
+        } elseif ($inDictLevelDefault) {
             if ($trimmed -match "^SunAwt(Frame|Dialog|Canvas|Component)=") {
-                $newLines += ($trimmed -replace "=.*$", "=2")
-                continue
+                $lineToEmit = ($trimmed -replace "=.*$", "=2")
+            } elseif ($trimmed -match "^TX(32|33|33_DOTNET)=") {
+                $lineToEmit = ($trimmed -replace "=.*$", "=10")
+            } elseif ($trimmed -match "^TX(20|20_DOTNET)=") {
+                $lineToEmit = ($trimmed -replace "=.*$", "=2")
             }
-            if ($trimmed -match "^TX(32|33|33_DOTNET)=") {
-                $newLines += ($trimmed -replace "=.*$", "=10")
+        } elseif ($inEnableClassNames) {
+            if ($trimmed -match "^TX(20|20_DOTNET|32|33|33_DOTNET)=") {
+                $lineToEmit = ($trimmed -replace "=.*$", "=10")
+            }
+        }
+
+        if ($isManagedSection -and ($lineToEmit.Trim() -match "^([^=]+)=")) {
+            $kName = $matches[1].Trim()
+            if (-not $currentSectionKeys.Add($kName)) {
                 continue
             }
         }
 
-        if ($inEnableClassNames) {
-            if ($trimmed -match "^TX(32|33|33_DOTNET)=") {
-                $newLines += ($trimmed -replace "=.*$", "=10")
-                continue
-            }
-        }
-
-        $newLines += $line
+        $newLines.Add($lineToEmit)
     }
 
     if ($inDictBoxDisable -and -not $handledDictBox) {
-        foreach ($k in $config.DictBoxDisableClasses) { $newLines += $k }
+        Add-MissingSectionLines -TargetLines $config.DictBoxDisableClasses -List $newLines -SeenKeys $currentSectionKeys
     }
     if ($inDictLevelDefault -and -not $handledDictLevel) {
-        foreach ($k in $config.DictLevelDefaultClasses) { $newLines += $k }
+        Add-MissingSectionLines -TargetLines $config.DictLevelDefaultClasses -List $newLines -SeenKeys $currentSectionKeys
     }
     if ($inEnableClassNames -and -not $handledEnableClasses) {
-        foreach ($k in $config.EnableClasses) { $newLines += $k }
+        Add-MissingSectionLines -TargetLines $config.EnableClasses -List $newLines -SeenKeys $currentSectionKeys
     }
     if ($inGlobalEnable -and -not $handledGlobalEnable) {
-        foreach ($k in $config.EnableClasses) { $newLines += $k }
+        Add-MissingSectionLines -TargetLines $config.EnableClasses -List $newLines -SeenKeys $currentSectionKeys
+    }
+
+    while ($newLines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($newLines[$newLines.Count - 1])) {
+        $newLines.RemoveAt($newLines.Count - 1)
     }
 
     $appBlocks = @"
-
 [javaw]
 Key Delay=2
 
@@ -277,10 +287,51 @@ TX33_DOTNET=10
 TX32=10
 tx33_rtf=10
 TXTextControl=10
-"@
 
-    $finalContent = ($newLines -join "`r`n") + $appBlocks
-    Set-Content -Path $nsappsPath -Value $finalContent -Encoding ASCII
+[CNExpress]
+App Support GUID={dd100104-6205-11cf-ae61-0000e8a28647}
+Key Delay=2
+
+[CNExpress\Enable Class Names]
+TX20=10
+TX20_DOTNET=10
+tx20_rtf=10
+TXTextControl=10
+Edit=1
+RichEdit20W=4
+RichEdit50W=4
+RichEdit60W=4
+
+[CNExpress\Global Dictation Level Default]
+TX20=2
+TX20_DOTNET=2
+tx20_rtf=2
+TXTextControl=2
+
+[CNExpress.exe]
+App Support GUID={dd100104-6205-11cf-ae61-0000e8a28647}
+Key Delay=2
+
+[CNExpress.exe\Enable Class Names]
+TX20=10
+TX20_DOTNET=10
+tx20_rtf=10
+TXTextControl=10
+Edit=1
+RichEdit20W=4
+RichEdit50W=4
+RichEdit60W=4
+
+[CNExpress.exe\Global Dictation Level Default]
+TX20=2
+TX20_DOTNET=2
+tx20_rtf=2
+TXTextControl=2
+"@
+    $appBlocks = ($appBlocks -replace "\r?\n", "`r`n").Trim()
+
+    $finalContent = ($newLines -join "`r`n") + "`r`n`r`n" + $appBlocks
+    Set-Content -Path $nsappsPath -Value $finalContent -Encoding Unicode
     Write-Log "nsapps.ini succesvol geconfigureerd voor directe spraakdictatie."
 }
 
